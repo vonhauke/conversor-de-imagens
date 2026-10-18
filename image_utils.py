@@ -75,6 +75,8 @@ def _open_raw(path, raw_in):
             raise ValueError("Informe largura, altura e formato de pixel do .raw.")
         params = raw_in["width"], raw_in["height"], raw_in["pix_fmt"]
     width, height, pix_fmt = params
+    if width * height > 2 * Image.MAX_IMAGE_PIXELS:
+        raise ValueError(f"{width}x{height} é grande demais; confira largura e altura do .raw.")
     mode, rawmode, bpp = RAW_MODES[pix_fmt]
     need = width * height * bpp
     with open(path, "rb") as f:
@@ -93,7 +95,8 @@ def _has_alpha(img):
 def _to_8bit(img):
     """Imagens de 16/32 bits ou ponto flutuante viram 8 bits, reescalando a faixa de valores."""
     if img.mode.startswith("I;16"):
-        img = img.convert("I")
+        # faixa conhecida (0-65535): escala fixa, para uma imagem escura não virar branca
+        return img.convert("I").point(lambda v: v / 256).convert("L")
     if img.mode in ("I", "F"):
         _, hi = img.getextrema()
         if hi and hi > 255:
@@ -123,9 +126,7 @@ def _flatten(img, keep_gray=False):
 
 
 def _prepare(img, fmt, raw_out=None):
-    if fmt == "jpg":
-        return _flatten(img, keep_gray=True)
-    if fmt == "ppm":
+    if fmt in ("jpg", "ppm"):
         return _flatten(img, keep_gray=True)
     if fmt == "png":
         return img if img.mode in ("1", "L", "LA", "P", "RGB", "RGBA", "I;16") else _rgb_or_rgba(img)
@@ -171,7 +172,15 @@ def _save_kwargs(fmt, quality):
     return {}
 
 
-def _metadata(source_mode, img, fmt):
+def _color_family(mode):
+    if mode in ("1", "L", "LA", "La", "I", "F") or mode.startswith("I;16"):
+        return "gray"
+    if mode == "CMYK":
+        return "cmyk"
+    return "rgb" if mode in ("RGB", "RGBA", "RGBa", "P", "PA") else mode
+
+
+def _metadata(source_mode, img, prepared_mode, fmt):
     """EXIF e perfil de cor, nos formatos que os guardam."""
     if fmt not in ("jpg", "png", "webp", "tiff", "heic", "avif"):
         return {}
@@ -180,8 +189,8 @@ def _metadata(source_mode, img, fmt):
     if exif:
         meta["exif"] = exif.tobytes()
     icc = img.info.get("icc_profile")
-    # perfil CMYK aplicado a uma imagem já convertida para RGB deixaria as cores erradas
-    if icc and source_mode != "CMYK":
+    # perfil de cinza ou CMYK numa imagem convertida para RGB (ou vice-versa) deixaria as cores erradas
+    if icc and _color_family(source_mode) == _color_family(prepared_mode):
         meta["icc_profile"] = icc
     return meta
 
@@ -213,7 +222,8 @@ def convert(input_path, fmt, make_output_path, quality=90, raw_in=None, raw_out=
         return _convert_frame(_open_raw(input_path, raw_in), "RGB", fmt, make_output_path, quality, raw_out)
 
     with Image.open(input_path) as img:
-        if getattr(img, "n_frames", 1) > 1 and fmt in MULTIFRAME_FORMATS:
+        # MPO = JPG de celular/câmera com uma prévia ou mapa de profundidade junto: não é animação
+        if getattr(img, "n_frames", 1) > 1 and img.format != "MPO" and fmt in MULTIFRAME_FORMATS:
             out_path = make_output_path(output_extension(fmt))
             try:
                 kwargs = _save_kwargs(fmt, quality)
@@ -222,7 +232,11 @@ def convert(input_path, fmt, make_output_path, quality=90, raw_in=None, raw_out=
                 img.save(out_path, PIL_FORMAT[fmt], save_all=True, **kwargs)
                 return out_path
             except Exception:
-                img.seek(0)  # não deu para manter a animação: grava só o primeiro quadro
+                # não deu para manter a animação: grava só o primeiro quadro no mesmo arquivo
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+                img.seek(0)
+                make_output_path = lambda _ext: out_path
 
         source_mode = img.mode
         frame = ImageOps.exif_transpose(img)  # fotos de celular deitadas ficam em pé
@@ -230,8 +244,8 @@ def convert(input_path, fmt, make_output_path, quality=90, raw_in=None, raw_out=
 
 
 def _convert_frame(img, source_mode, fmt, make_output_path, quality, raw_out):
-    meta = _metadata(source_mode, img, fmt)
     prepared = _prepare(img, fmt, raw_out)
+    meta = _metadata(source_mode, img, prepared.mode, fmt)
     out_path = make_output_path(output_extension(fmt, prepared.size, raw_out))
     if fmt == "raw":
         _save_raw(prepared, out_path, raw_out["pix_fmt"])

@@ -685,8 +685,8 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
     def _desenhar_linhas(self):
         lote, self._rows_pendentes = self._rows_pendentes[:ROWS_PER_TICK], self._rows_pendentes[ROWS_PER_TICK:]
         for item in lote:
-            if item not in self.files:
-                continue  # removido antes de ser desenhado
+            if item.get("removido"):
+                continue
             row = FileRow(self.queue_frame, item["path"], self._remove_file, self._view_log)
             row.pack(fill="x", padx=4, pady=2)
             row.set_status(item["status"])
@@ -698,8 +698,10 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         if self._converting:
             return
         for item in self.files:
-            if item["path"] == path and item["row"] is not None:
-                item["row"].destroy()
+            if item["path"] == path:
+                item["removido"] = True
+                if item["row"] is not None:
+                    item["row"].destroy()
         self.files = [item for item in self.files if item["path"] != path]
         self._update_subtitle()
         self._refresh_visibility()
