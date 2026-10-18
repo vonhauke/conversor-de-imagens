@@ -8,10 +8,13 @@ podem ser arrastados do Explorer para qualquer ponto da janela (tkinterdnd2) ou 
 pelo botão "+ Adicionar arquivos" / clique na área de soltar.
 """
 
+import json
 import os
+import queue
 import threading
 import tkinter as tk
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -51,6 +54,27 @@ ROWS_PER_TICK = 25
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(_HERE, "icone_conversor.png")
+CONFIG_PATH = os.path.join(
+    os.environ.get("APPDATA") or os.path.expanduser("~"), "Conversor de Imagens", "config.json"
+)
+
+
+def carregar_config():
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            dados = json.load(f)
+        return dados if isinstance(dados, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def salvar_config(dados):
+    try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass  # não lembrar as escolhas não impede o uso
 
 
 def _format_size(path):
@@ -147,24 +171,70 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.files = []
         self._rows_pendentes = []
 
-        self.output_dir = tk.StringVar()
-        self.output_format = tk.StringVar(value="jpg")
-        self.quality = tk.IntVar(value=90)
+        cfg = carregar_config()
+        formato = cfg.get("formato") if cfg.get("formato") in iu.OUTPUT_FORMATS else "jpg"
+        qualidade = cfg.get("qualidade") if isinstance(cfg.get("qualidade"), int) else 90
+        pix_in = cfg.get("raw_in_pix_fmt") if cfg.get("raw_in_pix_fmt") in iu.RAW_PIXEL_FORMATS else "rgb24"
+        pix_out = cfg.get("raw_out_pix_fmt") if cfg.get("raw_out_pix_fmt") in iu.RAW_PIXEL_FORMATS else "rgb24"
+        pasta = cfg.get("pasta_saida") if isinstance(cfg.get("pasta_saida"), str) else ""
+
+        # Pasta escolhida em "Trocar" (lembrada entre usos) ou, se não houver, a da primeira imagem.
+        self.pasta_escolhida = pasta if os.path.isdir(pasta) else ""
+        self.pasta_padrao = ""
+        self.output_format = tk.StringVar(value=formato)
+        self.quality = tk.IntVar(value=min(max(qualidade, 1), 100))
 
         # Parâmetros dos .raw de entrada cujo nome não traz as dimensões (ex.: _1920x1080_rgb24).
-        self.raw_in_width = tk.StringVar(value="1920")
-        self.raw_in_height = tk.StringVar(value="1080")
-        self.raw_in_pix_fmt = tk.StringVar(value="rgb24")
+        self.raw_in_width = tk.StringVar(value=str(cfg.get("raw_in_largura", "1920")))
+        self.raw_in_height = tk.StringVar(value=str(cfg.get("raw_in_altura", "1080")))
+        self.raw_in_pix_fmt = tk.StringVar(value=pix_in)
 
-        self.raw_out_pix_fmt = tk.StringVar(value="rgb24")
+        self.raw_out_pix_fmt = tk.StringVar(value=pix_out)
 
         self._cancel_event = threading.Event()
+        # As threads de conversão não mexem na janela: deixam avisos aqui e a janela os lê.
+        self._avisos = queue.Queue()
         self._converting = False
+        self._config_mudou_durante_lote = False
         self._format_buttons = {}
         self._cor_borda_drop = COL_DROP_BORDER
 
         self._build_ui()
         self._encaixar_conteudo()
+
+        for var in (self.output_format, self.quality, self.raw_in_width, self.raw_in_height,
+                    self.raw_in_pix_fmt, self.raw_out_pix_fmt):
+            var.trace_add("write", lambda *_: self._config_mudou())
+        self.protocol("WM_DELETE_WINDOW", self._fechar)
+
+    def _config_atual(self):
+        return {
+            "formato": self.output_format.get(),
+            "qualidade": self.quality.get(),
+            "raw_in_largura": self.raw_in_width.get(),
+            "raw_in_altura": self.raw_in_height.get(),
+            "raw_in_pix_fmt": self.raw_in_pix_fmt.get(),
+            "raw_out_pix_fmt": self.raw_out_pix_fmt.get(),
+            "pasta_saida": self.pasta_escolhida,
+        }
+
+    def _fechar(self):
+        salvar_config(self._config_atual())
+        self._cancel_event.set()  # imagens que ainda não começaram não são convertidas
+        self.destroy()
+
+    def _config_mudou(self):
+        """Com outro formato, qualidade ou pasta, o que já foi convertido precisa ser feito de novo."""
+        if self._converting:
+            self._config_mudou_durante_lote = True
+            return
+        mudou = False
+        for item in self.files:
+            if item["status"] == STATUS_CONCLUIDO:
+                self._set_item_status(item["path"], STATUS_PENDENTE)
+                mudou = True
+        if mudou:
+            self._refresh_idle_text()
 
     def _ativar_arrastar_e_soltar(self):
         """Faz a janela inteira aceitar arquivos arrastados do Explorer."""
@@ -505,16 +575,22 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         ctk.CTkLabel(dest, text="📁", text_color=COL_SUB, font=(FONT, 13)).pack(
             side="left", padx=(14, 8)
         )
-        self.dest_label = ctk.CTkLabel(
-            dest, text="Pasta da primeira imagem adicionada", text_color=COL_DEST,
-            font=(FONT, 13), anchor="w",
-        )
-        self.dest_label.pack(side="left", fill="x", expand=True)
+        # os botões são empacotados antes do texto para nunca serem empurrados para fora por um caminho longo
         ctk.CTkButton(
             dest, text="Trocar", width=1, height=24, fg_color="transparent",
             hover_color=COL_CARD_ALT, text_color=COL_AMBER, font=(FONT, 12, "bold"),
             command=self._pick_output_dir,
-        ).pack(side="right", padx=14)
+        ).pack(side="right", padx=(4, 14))
+        self.dest_label = ctk.CTkLabel(
+            dest, text="", text_color=COL_DEST, font=(FONT, 13), anchor="w",
+        )
+        self.dest_label.pack(side="left", fill="x", expand=True)
+        self.padrao_btn = ctk.CTkButton(
+            dest, text="Usar pasta da imagem", width=1, height=24, fg_color="transparent",
+            hover_color=COL_CARD_ALT, text_color=COL_SUB, font=(FONT, 12),
+            command=self._usar_pasta_padrao,
+        )
+        self._refresh_dest()
 
     def _build_bottom_bar(self):
         wrap = ctk.CTkFrame(self, fg_color="transparent")
@@ -623,6 +699,15 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         done = sum(1 for f in self.files if f["status"] == STATUS_CONCLUIDO)
         errors = sum(1 for f in self.files if f["status"] == STATUS_ERRO)
+        restantes = total - done
+
+        if restantes == 0:
+            self.idle_label.configure(text=f"{done} concluído(s) · troque o formato ou adicione mais arquivos")
+            self.convert_btn.configure(
+                text="Converter tudo", state="disabled", fg_color=COL_CARD_ALT, text_color=COL_MUTED
+            )
+            return
+
         if done or errors:
             parts = []
             if done:
@@ -632,7 +717,10 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             self.idle_label.configure(text=" · ".join(parts))
         else:
             self.idle_label.configure(text=f"{total} arquivo(s) na fila")
-        self.convert_btn.configure(state="normal", fg_color=COL_AMBER, text_color=COL_AMBER_TEXT)
+        self.convert_btn.configure(
+            text=f"Converter {restantes} restante(s)" if done else "Converter tudo",
+            state="normal", fg_color=COL_AMBER, text_color=COL_AMBER_TEXT,
+        )
 
     def _update_subtitle(self):
         if self.files:
@@ -674,9 +762,9 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             item = {"path": path, "status": STATUS_PENDENTE, "log": "", "row": None}
             self.files.append(item)
             self._rows_pendentes.append(item)
-        if not self.output_dir.get():
-            self.output_dir.set(os.path.dirname(paths[0]))
-            self.dest_label.configure(text=self.output_dir.get())
+        if not self.pasta_padrao:
+            self.pasta_padrao = os.path.dirname(paths[0])
+            self._refresh_dest()
         self._update_subtitle()
         self._refresh_visibility()
         self._refresh_bottom_bar()
@@ -723,19 +811,42 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                     item["row"].set_status(status)
 
     # -------------------------------------------------------------- ações
+    def _pasta_saida(self):
+        return self.pasta_escolhida or self.pasta_padrao
+
+    @staticmethod
+    def _abreviar(caminho, limite=60):
+        if len(caminho) <= limite:
+            return caminho
+        return caminho[:18] + "…" + caminho[-(limite - 19):]
+
+    def _refresh_dest(self):
+        if self.pasta_escolhida:
+            self.dest_label.configure(text=self._abreviar(self.pasta_escolhida, 48))
+            self.padrao_btn.pack(side="right", before=self.dest_label)
+        else:
+            self.dest_label.configure(text=self._abreviar(self.pasta_padrao) or "Pasta da primeira imagem adicionada")
+            self.padrao_btn.pack_forget()
+
     def _pick_output_dir(self):
         path = filedialog.askdirectory(title="Escolha a pasta de saída")
         if path:
-            self.output_dir.set(path)
-            self.dest_label.configure(text=path)
+            self.pasta_escolhida = os.path.normpath(path)
+            self._refresh_dest()
+            self._config_mudou()
+
+    def _usar_pasta_padrao(self):
+        self.pasta_escolhida = ""
+        self._refresh_dest()
+        self._config_mudou()
 
     def _start_batch(self):
         if self._converting:
             return
-        if not self.files:
-            messagebox.showwarning("Atenção", "Adicione ao menos um arquivo.")
+        items = [f for f in self.files if f["status"] != STATUS_CONCLUIDO]
+        if not items:
             return
-        out_dir = self.output_dir.get().strip()
+        out_dir = self._pasta_saida()
         if not out_dir:
             messagebox.showwarning("Atenção", "Escolha uma pasta de saída.")
             return
@@ -757,66 +868,88 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         out_format = self.output_format.get()
         raw_out = {"pix_fmt": self.raw_out_pix_fmt.get()} if out_format == "raw" else None
 
-        for item in self.files:
+        for item in items:
             self._set_item_status(item["path"], STATUS_PENDENTE)
             item["log"] = ""
 
+        salvar_config(self._config_atual())
         self._cancel_event.clear()
         self._converting = True
+        self._config_mudou_durante_lote = False
         self.overall_progress.set(0)
         self.overall_pct_label.configure(text="0%")
+        self.convert_label.configure(text=f"Convertendo · 0 de {len(items)} prontas")
         self.summary_label.configure(text="")
         self._refresh_bottom_bar()
 
         thread = threading.Thread(
             target=self._run_batch_thread,
-            args=(list(self.files), out_dir, out_format, self.quality.get(), raw_in, raw_out),
+            args=(items, out_dir, out_format, self.quality.get(), raw_in, raw_out),
             daemon=True,
         )
         thread.start()
+        self._ler_avisos()
 
     def _cancel_batch(self):
         self._cancel_event.set()
-        self.convert_label.configure(text="Cancelando...")
+        self.convert_label.configure(text="Cancelando... (terminando as que já começaram)")
+
+    def _ui(self, func, *args):
+        self._avisos.put((func, args))
+
+    def _ler_avisos(self):
+        while True:
+            try:
+                func, args = self._avisos.get_nowait()
+            except queue.Empty:
+                break
+            func(*args)
+        if self._converting:
+            self.after(50, self._ler_avisos)
 
     def _run_batch_thread(self, items, out_dir, out_format, quality, raw_in, raw_out):
         total = len(items)
         used_names = set()
-        done_count = 0
-        error_count = 0
+        lock = threading.Lock()
+        contagem = {"ok": 0, "erro": 0, "prontas": 0}
 
-        for index, item in enumerate(items):
+        def caminho_saida(base_name, ext):
+            with lock:
+                return self._unique_output_path(base_name, ext, out_dir, used_names)
+
+        def converter(item):
             path = item["path"]
-
             if self._cancel_event.is_set():
-                self.after(0, self._set_item_status, path, STATUS_CANCELADO)
-                continue
-
-            self.after(0, self._set_item_status, path, STATUS_CONVERTENDO)
-            self.after(
-                0, self.convert_label.configure,
-                {"text": f"Convertendo {index + 1} de {total} · {os.path.basename(path)}"},
-            )
-
+                self._ui(self._set_item_status, path, STATUS_CANCELADO)
+                return
+            self._ui(self._set_item_status, path, STATUS_CONVERTENDO)
             base_name = os.path.splitext(os.path.basename(path))[0]
             try:
                 iu.convert(
-                    path, out_format,
-                    lambda ext: self._unique_output_path(base_name, ext, out_dir, used_names),
+                    path, out_format, lambda ext: caminho_saida(base_name, ext),
                     quality=quality, raw_in=raw_in, raw_out=raw_out,
                 )
-                done_count += 1
-                self.after(0, self._set_item_status, path, STATUS_CONCLUIDO)
+                status = STATUS_CONCLUIDO
             except Exception:
-                error_count += 1
                 item["log"] = traceback.format_exc()
-                self.after(0, self._set_item_status, path, STATUS_ERRO)
+                status = STATUS_ERRO
+            with lock:
+                contagem["ok" if status == STATUS_CONCLUIDO else "erro"] += 1
+                contagem["prontas"] += 1
+                prontas = contagem["prontas"]
+            self._ui(self._item_terminado, path, status, prontas, total)
 
-            overall_done = (index + 1) / total
-            self.after(0, self.overall_progress.set, overall_done)
-            self.after(0, self.overall_pct_label.configure, {"text": f"{int(overall_done * 100)}%"})
+        with ThreadPoolExecutor(max_workers=iu.parallel_workers(out_format)) as pool:
+            list(pool.map(converter, items))
 
-        self.after(0, self._on_batch_done, done_count, error_count, total)
+        self._ui(self._on_batch_done, contagem["ok"], contagem["erro"], total)
+
+    def _item_terminado(self, path, status, prontas, total):
+        self._set_item_status(path, status)
+        self.overall_progress.set(prontas / total)
+        self.overall_pct_label.configure(text=f"{int(prontas / total * 100)}%")
+        if not self._cancel_event.is_set():
+            self.convert_label.configure(text=f"Convertendo · {prontas} de {total} prontas")
 
     @staticmethod
     def _unique_output_path(base_name, ext, out_dir, used_names):
@@ -842,6 +975,8 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             self.summary_label.configure(text=f"Concluído: {done_count}/{total} arquivos convertidos.")
 
         self._refresh_bottom_bar()
+        if self._config_mudou_durante_lote:
+            self._config_mudou()
 
 
 if __name__ == "__main__":

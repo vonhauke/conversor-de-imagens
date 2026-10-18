@@ -48,6 +48,18 @@ RAW_PIXEL_FORMATS = list(RAW_MODES)
 # para poderem ser lidos de volta depois do databending sem precisar digitar nada.
 _RAW_TAG_RE = re.compile(r"(\d+)x(\d+)_(" + "|".join(RAW_PIXEL_FORMATS) + r")(?![a-z0-9])", re.I)
 
+# Os codificadores de HEIC e AVIF já usam quase todos os núcleos numa imagem só: converter
+# muitas ao mesmo tempo não acelera, só gasta memória.
+_SELF_THREADED = {"heic", "avif"}
+
+
+def parallel_workers(fmt):
+    """Quantas imagens converter ao mesmo tempo para o formato de destino."""
+    if fmt in _SELF_THREADED:
+        return 2
+    return max(1, min(8, (os.cpu_count() or 2) - 1))
+
+
 ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 

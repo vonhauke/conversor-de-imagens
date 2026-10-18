@@ -11,6 +11,9 @@ HEIC, AVIF, TGA, PPM** e **RAW** (pixels puros, sem cabeçalho, usado em fluxos 
 - Mantém **animações** ao converter entre GIF, WEBP, PNG (APNG), AVIF e TIFF de várias páginas
 - Fotos de celular deitadas são endireitadas automaticamente (orientação EXIF)
 - Mantém os dados EXIF e o perfil de cor quando o formato de destino aceita
+- **Rápido em lotes grandes:** converte várias imagens ao mesmo tempo, usando os vários núcleos do processador (sem mudar nada na qualidade)
+- **Converte só o que falta:** clicar de novo em **Converter** só processa os arquivos novos ou que deram erro. Trocar o formato, a qualidade ou a pasta libera tudo para converter de novo
+- **Lembra suas escolhas:** formato, qualidade, pasta de destino e opções de `.raw` voltam como estavam da última vez
 - Em caso de erro, o botão **ver detalhes** mostra o motivo
 - Os arquivos convertidos são salvos como `nome_convertido.formato`, sem sobrescrever os originais nem conversões anteriores
 
@@ -35,8 +38,17 @@ python main.py
 
 1. **Arraste imagens ou pastas** do Explorer para a janela, ou clique em **+ Adicionar arquivos** (ou na área pontilhada) e escolha-as.
 2. Escolha o formato em **Converter para** e, se for JPG, WEBP, HEIC ou AVIF, a **qualidade** (padrão 90).
-3. Se quiser, troque a pasta em **Salvar em** (padrão: a pasta da primeira imagem adicionada).
+3. Se quiser, troque a pasta em **Salvar em** (padrão: a pasta da primeira imagem adicionada). A pasta escolhida
+   fica guardada para as próximas vezes; **Usar pasta da imagem** volta ao padrão.
 4. Clique em **Converter tudo**.
+
+As escolhas ficam em `%APPDATA%\Conversor de Imagens\config.json`.
+
+## Velocidade
+
+O app converte até 8 imagens ao mesmo tempo (uma por núcleo do processador, deixando um livre). HEIC e AVIF são
+exceção: os codificadores desses formatos já usam quase todos os núcleos numa imagem só, então o app converte só 2
+por vez, para não gastar memória à toa. Em testes com fotos de 6 MP, JPG, PNG e WEBP ficaram cerca de 5 vezes mais rápidos.
 
 ## Como cada formato é gravado
 
@@ -68,6 +80,16 @@ Um `.raw` não tem cabeçalho: são só os bytes dos pixels, um atrás do outro.
   *Parâmetros dos arquivos .raw* para informar largura, altura e formato de pixel (valem para todos os `.raw` sem o padrão no nome).
 - Se o arquivo mudou de tamanho depois da edição, o app completa com preto o que faltar ou ignora o que sobrar, em vez de dar erro.
 
+## Testes
+
+```
+python -m unittest discover -s tests -v
+```
+
+`tests/test_image_utils.py` converte cada tipo de entrada para cada formato de saída e cobre os casos delicados
+(fotos de celular, 16 bits, perfis de cor, animações, `.raw`). `tests/test_app.py` abre a janela escondida e roda
+lotes completos (só o que falta, conversão em paralelo, cancelar, escolhas lembradas). Leva cerca de 30 segundos.
+
 ## Gerar o .exe
 
 ```
@@ -84,4 +106,5 @@ O executável sai em `dist/`, em um único arquivo.
 | `main.py` | Interface gráfica (CustomTkinter) e controle da fila |
 | `image_utils.py` | Abre, ajusta o modo de cor e grava cada formato (inclusive `.raw`) |
 | `build_exe.py` | Gera o `.exe` |
+| `tests/` | Testes automáticos |
 | `icone_conversor.png` / `.ico` | Ícone do app |
