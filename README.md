@@ -90,7 +90,7 @@ python -m unittest discover -s tests -v
 (fotos de celular, 16 bits, perfis de cor, animações, `.raw`). `tests/test_app.py` abre a janela escondida e roda
 lotes completos (só o que falta, conversão em paralelo, cancelar, escolhas lembradas). Leva cerca de 30 segundos.
 
-## Gerar o .exe
+## Gerar o .exe (Windows)
 
 ```
 pip install pyinstaller customtkinter pillow pillow-heif tkinterdnd2
@@ -99,12 +99,33 @@ python build_exe.py
 
 O executável sai em `dist/`, em um único arquivo.
 
+## Gerar o .app (Mac)
+
+Só funciona rodando no próprio Mac (o PyInstaller não faz build cruzado).
+
+```
+brew install python
+cd mac
+pip3 install pyinstaller customtkinter pillow pillow-heif tkinterdnd2
+python3 build_mac.py
+```
+
+O app sai em `mac/dist/Conversor de Imagens.app`, copiado também para a Área de
+Trabalho. Sem build, dá pra rodar direto o código-fonte:
+
+```
+brew install python
+pip3 install customtkinter pillow pillow-heif tkinterdnd2
+python3 main.py
+```
+
 ## Estrutura
 
 | Arquivo | Função |
 |---------|--------|
 | `main.py` | Interface gráfica (CustomTkinter) e controle da fila |
 | `image_utils.py` | Abre, ajusta o modo de cor e grava cada formato (inclusive `.raw`) |
-| `build_exe.py` | Gera o `.exe` |
+| `build_exe.py` | Gera o `.exe` (Windows) |
+| `mac/build_mac.py` | Gera o `.app` (Mac) |
 | `tests/` | Testes automáticos |
-| `icone_conversor.png` / `.ico` | Ícone do app |
+| `icone_conversor.png` / `.ico` / `.icns` | Ícone do app |
