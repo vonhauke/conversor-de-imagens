@@ -28,7 +28,6 @@ import main as app_mod  # noqa: E402
 
 app_mod.CONFIG_PATH = os.path.join(TMP, "config", "config.json")   # não mexe nas escolhas reais
 import argila  # noqa: E402
-import webview  # noqa: E402
 
 SAIDA = os.path.join(TMP, "saida")
 CAPTURAS = os.environ.get("ARGILA_CAPTURAS")
@@ -187,7 +186,8 @@ def main():
     app = app_mod.App(emitir)
     janela = argila.criar_janela("Conversor de Imagens (teste)", app, 800, 820, 660, 580)
     app._janela = emitir.janela = janela
-    webview.start(roteiro, (janela, app, arquivos), http_server=True, private_mode=True)
+    # abre pelo mesmo caminho do app de verdade (argila.iniciar, com o ícone)
+    argila.iniciar(roteiro, (janela, app, arquivos), icone="icone_conversor.png", titulo=app_mod.TITULO)
     shutil.rmtree(TMP, ignore_errors=True)
     if falhas:
         print(f"\n{len(falhas)} falha(s):\n- " + "\n- ".join(falhas))
