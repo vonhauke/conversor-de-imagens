@@ -101,7 +101,7 @@ def roteiro(janela, app, arquivos):
         return esperar(f"Conversor._s.lotes > {antes} && !Conversor._s.convertendo", 180, nome)
 
     try:
-        esperar("document.documentElement.classList.contains('pronto')", 30, "interface pronta")
+        esperar("document.documentElement.classList.contains('pronto')", 90, "interface pronta")
         capturar("01-vazio")
         app.pasta_escolhida = SAIDA
         os.makedirs(SAIDA, exist_ok=True)
