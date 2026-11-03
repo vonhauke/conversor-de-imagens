@@ -10,7 +10,7 @@ So funciona rodando no proprio Mac (o PyInstaller nao faz build cruzado).
 
 Uso:
     cd mac
-    pip3 install pyinstaller customtkinter pillow pillow-heif tkinterdnd2
+    pip3 install pyinstaller pywebview pillow pillow-heif
     python3 build_mac.py
 
 Depois, copie "dist/Conversor de Imagens.app" para a pasta Aplicativos.
@@ -33,7 +33,7 @@ args = [
     os.path.join(RAIZ, "main.py"),
     "--noconfirm",
     "--clean",
-    "--onefile",
+    # pasta (onedir), o formato recomendado pelo PyInstaller para .app
     "--windowed",
     "--name", NOME,
     "--distpath", os.path.join(AQUI, "dist"),
@@ -41,8 +41,8 @@ args = [
     "--specpath", AQUI,
     "--icon", os.path.join(RAIZ, "icone_conversor.icns"),
     "--add-data", f"{os.path.join(RAIZ, 'icone_conversor.png')}:.",
-    "--collect-all", "customtkinter",
-    "--collect-all", "tkinterdnd2",
+    "--add-data", f"{os.path.join(RAIZ, 'ui')}:ui",   # a interface (HTML/CSS/JS, fontes e icones)
+    "--collect-all", "webview",                       # pywebview (janela com o WebKit do Mac)
     "--collect-all", "pillow_heif",
 ]
 

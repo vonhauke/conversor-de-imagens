@@ -1,11 +1,12 @@
 # Conversor de Imagens
 
-Aplicativo de janela para Windows que converte várias imagens de uma vez entre **JPG, PNG, WEBP, GIF, BMP, TIFF, ICO,
+Aplicativo de janela para Windows e Mac que converte várias imagens de uma vez entre **JPG, PNG, WEBP, GIF, BMP, TIFF, ICO,
 HEIC, AVIF, TGA, PPM** e **RAW** (pixels puros, sem cabeçalho, usado em fluxos de glitch art). É o irmão do
 [Conversor de Vídeos](https://github.com/vonhauke/conversor-de-videos), com o mesmo visual. A conversão é feita pela
 [Pillow](https://python-pillow.org/) (e pela [pillow-heif](https://github.com/bigcat88/pillow_heif) para HEIC).
 
-- Interface escura feita com [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) (grafite, marfim e âmbar)
+- Visual no estilo dos apps do Claude (design system **Argila**, em `ui/ds/`): fundo creme, laranja terracota,
+  títulos em serifa e **tema escuro automático** que segue o Windows/Mac
 - Conversão em lote: arraste imagens **ou pastas inteiras** (com subpastas) e clique em **Converter tudo**
 - Controle de **qualidade** para os formatos com perda (JPG, WEBP, HEIC e AVIF)
 - Mantém **animações** ao converter entre GIF, WEBP, PNG (APNG), AVIF e TIFF de várias páginas
@@ -17,6 +18,8 @@ HEIC, AVIF, TGA, PPM** e **RAW** (pixels puros, sem cabeçalho, usado em fluxos 
 - Em caso de erro, o botão **ver detalhes** mostra o motivo
 - Os arquivos convertidos são salvos como `nome_convertido.formato`, sem sobrescrever os originais nem conversões anteriores
 
+![Conversor de Imagens nos temas claro e escuro](docs/capturas/vitrine.png)
+
 ## Baixar e usar (Windows)
 
 1. Abra a página de [**Releases**](https://github.com/vonhauke/conversor-de-imagens/releases/latest) e baixe o arquivo **Conversor de Imagens.exe**.
@@ -27,10 +30,10 @@ HEIC, AVIF, TGA, PPM** e **RAW** (pixels puros, sem cabeçalho, usado em fluxos 
 
 ## Rodar pelo código-fonte
 
-Precisa de Windows e Python 3.10+.
+Precisa de Windows ou Mac e Python 3.10+ (no Linux, também o WebKit: `sudo apt install python3-gi gir1.2-webkit2-4.1`).
 
 ```
-pip install customtkinter pillow pillow-heif tkinterdnd2
+pip install pywebview pillow pillow-heif
 python main.py
 ```
 
@@ -87,13 +90,14 @@ python -m unittest discover -s tests -v
 ```
 
 `tests/test_image_utils.py` converte cada tipo de entrada para cada formato de saída e cobre os casos delicados
-(fotos de celular, 16 bits, perfis de cor, animações, `.raw`). `tests/test_app.py` abre a janela escondida e roda
-lotes completos (só o que falta, conversão em paralelo, cancelar, escolhas lembradas). Leva cerca de 30 segundos.
+(fotos de celular, 16 bits, perfis de cor, animações, `.raw`). `tests/test_app.py` roda lotes
+completos na fila, sem abrir janela (só o que falta, pastas, conversão em paralelo, cancelar, escolhas lembradas).
+`.github/teste_e2e.py` abre a janela real e usa o app como uma pessoa (precisa de tela).
 
 ## Gerar o .exe (Windows)
 
 ```
-pip install pyinstaller customtkinter pillow pillow-heif tkinterdnd2
+pip install pyinstaller pywebview pillow pillow-heif
 python build_exe.py
 ```
 
@@ -106,7 +110,7 @@ Só funciona rodando no próprio Mac (o PyInstaller não faz build cruzado).
 ```
 brew install python
 cd mac
-pip3 install pyinstaller customtkinter pillow pillow-heif tkinterdnd2
+pip3 install pyinstaller pywebview pillow pillow-heif
 python3 build_mac.py
 ```
 
@@ -115,17 +119,36 @@ Trabalho. Sem build, dá pra rodar direto o código-fonte:
 
 ```
 brew install python
-pip3 install customtkinter pillow pillow-heif tkinterdnd2
+pip3 install pywebview pillow pillow-heif
 python3 main.py
 ```
+
+## Builds automáticos (GitHub Actions)
+
+A cada envio para a `master`, a automação `.github/workflows/gerar-exe.yml` roda os testes e o teste de ponta a
+ponta na janela real, num Windows e num Mac da nuvem do GitHub, e gera o `.exe` (Windows) e o `.app` (Mac Apple
+Silicon e Mac Intel). Para baixar, abra a aba **Actions**, entre na execução mais recente e role até **Artifacts**.
+No Mac, na primeira vez, clique no app com o botão direito → **Abrir** (ele não é assinado com certificado da Apple).
+
+## Design
+
+A tela é feita em HTML/CSS e mostrada numa janela nativa pelo [pywebview](https://pywebview.flowrl.com/)
+(Edge WebView2 no Windows, que já vem no Windows 11 e na maioria dos Windows 10; WebKit no Mac).
+O design system **Argila** (`ui/ds/` e `argila.py`) é o mesmo do SnapYou, do Conversor de Vídeos e do
+my chaotic room: fontes Source Serif 4 e DM Sans (licença OFL), ícones [Lucide](https://lucide.dev)
+(licença ISC). Veja `ui/ds/README.md`.
 
 ## Estrutura
 
 | Arquivo | Função |
 |---------|--------|
-| `main.py` | Interface gráfica (CustomTkinter) e controle da fila |
+| `main.py` | Fila, escolhas e lote de conversão (classe `App`), e a ponte com a interface |
+| `argila.py` | Parte Python do design system (janela, tema escuro, eventos para a interface), igual em todos os apps |
+| `ui/` | A interface (`index.html`, `app.css`, `app.js`) e o design system Argila em `ui/ds/` |
 | `image_utils.py` | Abre, ajusta o modo de cor e grava cada formato (inclusive `.raw`) |
 | `build_exe.py` | Gera o `.exe` (Windows) |
 | `mac/build_mac.py` | Gera o `.app` (Mac) |
 | `tests/` | Testes automáticos |
+| `.github/teste_e2e.py` | Teste de ponta a ponta na janela real |
+| `docs/capturas/` | Capturas de tela usadas neste README |
 | `icone_conversor.png` / `.ico` / `.icns` | Ícone do app |

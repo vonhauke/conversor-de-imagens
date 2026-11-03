@@ -1,7 +1,7 @@
 """Gera "Conversor de Imagens.exe" (arquivo único) em dist/.
 
 Uso:
-    pip install pyinstaller customtkinter pillow pillow-heif tkinterdnd2
+    pip install pyinstaller pywebview pillow pillow-heif
     python build_exe.py
 """
 
@@ -16,7 +16,7 @@ PyInstaller.__main__.run([
     "--name", "Conversor de Imagens",
     "--icon", os.path.join(AQUI, "icone_conversor.ico"),
     "--add-data", f"{os.path.join(AQUI, 'icone_conversor.png')};.",
-    "--collect-all", "customtkinter",
-    "--collect-all", "tkinterdnd2",
+    "--add-data", f"{os.path.join(AQUI, 'ui')};ui",   # a interface (HTML/CSS/JS, fontes e icones)
+    "--collect-all", "webview",                     # pywebview (janela com o Edge WebView2)
     "--collect-all", "pillow_heif",
 ])
